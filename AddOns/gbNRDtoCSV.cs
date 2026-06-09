@@ -4,7 +4,6 @@ using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -18,7 +17,7 @@ using NinjaTrader.Gui.Tools;
 
 namespace NinjaTrader.Gui.NinjaScript
 {
-    public class NRDToCSV : AddOnBase
+    public class gbNRDtoCSV : AddOnBase
     {
         private NTMenuItem menuItem;
         private NTMenuItem existingMenuItemInControlCenter;
@@ -27,7 +26,7 @@ namespace NinjaTrader.Gui.NinjaScript
         {
             if (State == State.SetDefaults)
             {
-                Name = "NRDToCSV";
+                Name = "gbNRDtoCSV";
                 Description = "*.nrd to *.csv market replay files convertion";
             }
         }
@@ -58,20 +57,22 @@ namespace NinjaTrader.Gui.NinjaScript
 
         private void OnMenuItemClick(object sender, RoutedEventArgs e)
         {
-            Core.Globals.RandomDispatcher.BeginInvoke(new Action(() => new NRDToCSVWindow().Show()));
+            Core.Globals.RandomDispatcher.BeginInvoke(new Action(() => new gbNRDtoCSVWindow().Show()));
         }
     }
 
-    public class NRDToCSVWindow : NTWindow, IWorkspacePersistence
+    public class gbNRDtoCSVWindow : NTWindow, IWorkspacePersistence
     {
         private static readonly int PARALLEL_THREADS_COUNT = 4;
 
         private TextBox tbCsvRootDir;
-        private TextBox tbSelectedInstruments;
         private Button bConvert;
         private TextBox tbOutput;
         private Label lProgress;
         private ProgressBar pbProgress;
+        private ScrollViewer svInstruments;
+        private StackPanel spInstruments;
+        private HashSet<string> uncheckedInstruments;
         private int taskCount;
         private DateTime startTimestamp;
         private long completeFilesLength;
@@ -79,7 +80,7 @@ namespace NinjaTrader.Gui.NinjaScript
         private bool running = false;
         private bool canceling = false;
 
-        public NRDToCSVWindow()
+        public gbNRDtoCSVWindow()
         {
             Caption = "NRD to CSV";
             Width = 512;
@@ -88,7 +89,8 @@ namespace NinjaTrader.Gui.NinjaScript
             Loaded += (o, e) =>
             {
                 if (WorkspaceOptions == null)
-                    WorkspaceOptions = new WorkspaceOptions("NRDToCSV-" + Guid.NewGuid().ToString("N"), this);
+                    WorkspaceOptions = new WorkspaceOptions("gbNRDtoCSV-" + Guid.NewGuid().ToString("N"), this);
+                ScanInstruments();
             };
             Closing += (o, e) =>
             {
@@ -104,7 +106,6 @@ namespace NinjaTrader.Gui.NinjaScript
             base.OnClosed(e);
         }
 
-
         private DependencyObject BuildContent()
         {
             double margin = (double)FindResource("MarginBase");
@@ -119,13 +120,40 @@ namespace NinjaTrader.Gui.NinjaScript
                 Margin = new Thickness(margin, 0, margin, 0),
                 Content = "Root directory of converted CSV files:",
             };
-            tbSelectedInstruments = new TextBox() { Margin = new Thickness(margin, 0, margin, margin) };
-            Label lSelectedInstruments = new Label()
+
+            Button btnSelectAll = new Button() { Content = "All", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(0, 0, 4, 0) };
+            Button btnSelectNone = new Button() { Content = "None", Padding = new Thickness(6, 0, 6, 0) };
+            btnSelectAll.Click += (s, ev) => { foreach (CheckBox cb in spInstruments.Children.OfType<CheckBox>()) cb.IsChecked = true; };
+            btnSelectNone.Click += (s, ev) => { foreach (CheckBox cb in spInstruments.Children.OfType<CheckBox>()) cb.IsChecked = false; };
+            StackPanel spButtons = new StackPanel() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            spButtons.Children.Add(btnSelectAll);
+            spButtons.Children.Add(btnSelectNone);
+            DockPanel dpInstrumentsHeader = new DockPanel() { Margin = new Thickness(margin, margin, margin, 0) };
+            DockPanel.SetDock(spButtons, Dock.Right);
+            dpInstrumentsHeader.Children.Add(spButtons);
+            dpInstrumentsHeader.Children.Add(new Label()
             {
                 Foreground = FindResource("FontLabelBrush") as Brush,
-                Margin = new Thickness(margin, margin, margin, 0),
-                Content = "Semicolon separated RegEx'es to filter *.nrd file names (keep empty to proceed all):",
+                Content = "Instruments to convert:",
+                Padding = new Thickness(0),
+                VerticalContentAlignment = VerticalAlignment.Center,
+            });
+
+            spInstruments = new StackPanel();
+            spInstruments.Children.Add(new TextBlock()
+            {
+                Text = "Scanning...",
+                Foreground = FindResource("FontLabelBrush") as Brush,
+                Margin = new Thickness(4),
+            });
+            svInstruments = new ScrollViewer()
+            {
+                Height = 150,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = spInstruments,
+                Margin = new Thickness(margin, 0, margin, margin),
             };
+
             bConvert = new Button() { Margin = new Thickness(margin), IsDefault = true, Content = "_Convert" };
             bConvert.Click += OnConvertButtonClick;
             tbOutput = new TextBox()
@@ -156,21 +184,75 @@ namespace NinjaTrader.Gui.NinjaScript
             grid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
             Grid.SetRow(lCsvRootDir, 0);
             Grid.SetRow(tbCsvRootDir, 1);
-            Grid.SetRow(lSelectedInstruments, 2);
-            Grid.SetRow(tbSelectedInstruments, 3);
+            Grid.SetRow(dpInstrumentsHeader, 2);
+            Grid.SetRow(svInstruments, 3);
             Grid.SetRow(bConvert, 4);
             Grid.SetRow(tbOutput, 5);
             Grid.SetRow(lProgress, 6);
             Grid.SetRow(pbProgress, 7);
             grid.Children.Add(lCsvRootDir);
             grid.Children.Add(tbCsvRootDir);
-            grid.Children.Add(lSelectedInstruments);
-            grid.Children.Add(tbSelectedInstruments);
+            grid.Children.Add(dpInstrumentsHeader);
+            grid.Children.Add(svInstruments);
             grid.Children.Add(bConvert);
             grid.Children.Add(tbOutput);
             grid.Children.Add(lProgress);
             grid.Children.Add(pbProgress);
             return grid;
+        }
+
+        private void ScanInstruments()
+        {
+            string nrdDir = Path.Combine(Globals.UserDataDir, "db", "replay");
+            Globals.RandomDispatcher.InvokeAsync(new Action(() =>
+            {
+                string[] subDirs = null;
+                if (Directory.Exists(nrdDir))
+                    subDirs = Directory.GetDirectories(nrdDir);
+
+                Dispatcher.InvokeAsync(() =>
+                {
+                    spInstruments.Children.Clear();
+                    if (subDirs == null)
+                    {
+                        spInstruments.Children.Add(new TextBlock()
+                        {
+                            Text = "NRD replay directory not found.",
+                            Foreground = FindResource("FontLabelBrush") as Brush,
+                            Margin = new Thickness(4),
+                        });
+                        return;
+                    }
+                    if (subDirs.Length == 0)
+                    {
+                        spInstruments.Children.Add(new TextBlock()
+                        {
+                            Text = "No instruments found.",
+                            Foreground = FindResource("FontLabelBrush") as Brush,
+                            Margin = new Thickness(4),
+                        });
+                        return;
+                    }
+                    foreach (string subDir in subDirs)
+                    {
+                        string name = Path.GetFileName(subDir);
+                        spInstruments.Children.Add(new CheckBox()
+                        {
+                            Content = name,
+                            Tag = name,
+                            IsChecked = true,
+                            Margin = new Thickness(4, 2, 4, 2),
+                        });
+                    }
+                    if (uncheckedInstruments != null)
+                    {
+                        foreach (CheckBox cb in spInstruments.Children.OfType<CheckBox>())
+                            if (uncheckedInstruments.Contains((string)cb.Tag))
+                                cb.IsChecked = false;
+                        uncheckedInstruments = null;
+                    }
+                });
+            }));
         }
 
         private void OnConvertButtonClick(object sender, RoutedEventArgs e)
@@ -194,8 +276,6 @@ namespace NinjaTrader.Gui.NinjaScript
 
             string nrdDir = Path.Combine(Globals.UserDataDir, "db", "replay");
             string csvDir = tbCsvRootDir.Text;
-            List<Regex> selectedInstruments = tbSelectedInstruments.Text.IsNullOrEmpty() ? null :
-                tbSelectedInstruments.Text.Split(';').Select(p => new Regex(p.Trim())).ToList();
 
             if (!Directory.Exists(nrdDir))
             {
@@ -203,10 +283,24 @@ namespace NinjaTrader.Gui.NinjaScript
                 return;
             }
 
-            string[] nrdSubDirs = Directory.GetDirectories(nrdDir);
+            HashSet<string> checkedInstruments = new HashSet<string>(
+                spInstruments.Children.OfType<CheckBox>()
+                    .Where(cb => cb.IsChecked == true)
+                    .Select(cb => (string)cb.Tag));
+
+            if (checkedInstruments.Count == 0)
+            {
+                logout("No instruments selected.");
+                return;
+            }
+
+            string[] nrdSubDirs = Directory.GetDirectories(nrdDir)
+                .Where(d => checkedInstruments.Contains(Path.GetFileName(d)))
+                .ToArray();
+
             if (nrdSubDirs.Length == 0)
             {
-                logout(string.Format("WARNING: The NRD root directory \"{0}\" is empty", nrdDir));
+                logout(string.Format("WARNING: No selected instruments found in \"{0}\"", nrdDir));
                 return;
             }
 
@@ -229,7 +323,7 @@ namespace NinjaTrader.Gui.NinjaScript
                 totalFilesLength = 0;
                 List<DumpEntry> entries = new List<DumpEntry>();
                 foreach (string subDir in nrdSubDirs)
-                    ProceedDirectory(entries, nrdDir, subDir, csvDir, selectedInstruments);
+                    ProceedDirectory(entries, nrdDir, subDir, csvDir);
                 if (entries.Count == 0)
                 {
                     logout("No *.nrd files found to convert");
@@ -248,7 +342,7 @@ namespace NinjaTrader.Gui.NinjaScript
             }));
         }
 
-        private void ProceedDirectory(List<DumpEntry> entries, string nrdRoot, string nrdDir, string csvDir, List<Regex> selectedInstruments)
+        private void ProceedDirectory(List<DumpEntry> entries, string nrdRoot, string nrdDir, string csvDir)
         {
             string[] fileEntries = Directory.GetFiles(nrdDir, "*.nrd");
             if (fileEntries.Length == 0)
@@ -261,9 +355,6 @@ namespace NinjaTrader.Gui.NinjaScript
             {
                 string fullName = Path.GetFileName(Path.GetDirectoryName(fileName));
                 string relativeName = fileName.Substring(nrdRoot.Length);
-
-                if (selectedInstruments != null && selectedInstruments.Where(r => r.Match(relativeName).Success).Count() == 0)
-                    continue;
 
                 Collection<Instrument> instruments = InstrumentList.GetInstruments(fullName);
                 if (instruments.Count == 0)
@@ -292,9 +383,9 @@ namespace NinjaTrader.Gui.NinjaScript
                     NrdLength = nrdFileLength,
                     Instrument = instrument,
                     Date = new DateTime(
-                        Convert.ToInt16(name.Substring(0, 4)),
-                        Convert.ToInt16(name.Substring(4, 2)),
-                        Convert.ToInt16(name.Substring(6, 2))),
+                        Convert.ToInt32(name.Substring(0, 4)),
+                        Convert.ToInt32(name.Substring(4, 2)),
+                        Convert.ToInt32(name.Substring(6, 2))),
                     CsvFileName = csvFileName,
                     FromName = relativeName.Substring(1),
                     ToName = csvFileName.Substring(csvDir.Length + 1),
@@ -308,16 +399,17 @@ namespace NinjaTrader.Gui.NinjaScript
             {
                 for (int i = offset; i < entries.Count; i += increment)
                 {
-                    ConvertNrd(entries[i]);
+                    DumpEntry entry = entries[i];
+                    ConvertNrd(entry);
                     Dispatcher.InvokeAsync(() =>
                     {
                         pbProgress.Value++;
-                        completeFilesLength += entries[i].NrdLength;
+                        completeFilesLength += entry.NrdLength;
                         string eta = "";
                         if (completeFilesLength > 0)
                         {
                             DateTime etaValue = new DateTime(
-                                (long)((DateTime.Now.Ticks - startTimestamp.Ticks) * (totalFilesLength / completeFilesLength - 1)));
+                                (long)((DateTime.Now.Ticks - startTimestamp.Ticks) * (totalFilesLength / (double)completeFilesLength - 1.0)));
                             eta = string.Format(" ETA: {0}:{1}", etaValue.Day - 1, etaValue.ToString("HH:mm:ss"));
                         }
                         lProgress.Content = string.Format("{0} of {1} files converted ({2} of {3}){4}",
@@ -355,17 +447,18 @@ namespace NinjaTrader.Gui.NinjaScript
                 {
                     logout(string.Format("ERROR: Unable to create the CSV file directory \"{0}\": {1}",
                         csvFileDir, error.ToString()));
+                    return;
                 }
             }
 
             try
             {
-                MarketReplay.DumpMarketDepth(entry.Instrument, entry.Date, entry.Date, entry.CsvFileName); // Instrument, start date, end date, csv file name
+                MarketReplay.DumpMarketDepth(entry.Instrument, entry.Date, entry.Date, entry.CsvFileName);
                 logout(string.Format("Conversion \"{0}\" to \"{1}\" complete", entry.FromName, entry.ToName));
             }
             catch (Exception error)
             {
-                logout(string.Format("ERROR: Conversion \"{0}\" to \"{1}\" failed: {2}", 
+                logout(string.Format("ERROR: Conversion \"{0}\" to \"{1}\" failed: {2}",
                     entry.FromName, entry.ToName, error.ToString()));
             }
         }
@@ -374,27 +467,30 @@ namespace NinjaTrader.Gui.NinjaScript
         {
             foreach (XElement elRoot in element.Elements())
             {
-                if (elRoot.Name.LocalName.Contains("NRDToCSV"))
+                if (elRoot.Name.LocalName.Contains("gbNRDtoCSV"))
                 {
                     XElement elCsvRootDir = elRoot.Element("CsvRootDir");
                     if (elCsvRootDir != null)
                         tbCsvRootDir.Text = elCsvRootDir.Value;
 
-                    XElement elSelectedInstruments = elRoot.Element("SelectedInstruments");
-                    if (elSelectedInstruments != null)
-                        tbSelectedInstruments.Text = elSelectedInstruments.Value;
+                    XElement elUncheckedInstruments = elRoot.Element("UncheckedInstruments");
+                    if (elUncheckedInstruments != null && !string.IsNullOrEmpty(elUncheckedInstruments.Value))
+                        uncheckedInstruments = new HashSet<string>(elUncheckedInstruments.Value.Split(','));
                 }
             }
         }
 
         public void Save(XDocument document, XElement element)
         {
-            element.Elements().Where(el => el.Name.LocalName.Equals("NRDToCSV")).Remove();
-            XElement elRoot = new XElement("NRDToCSV");
+            element.Elements().Where(el => el.Name.LocalName.Equals("gbNRDtoCSV")).Remove();
+            XElement elRoot = new XElement("gbNRDtoCSV");
             XElement elCsvRootDir = new XElement("CsvRootDir", tbCsvRootDir.Text);
-            XElement elSelectedInstruments = new XElement("SelectedInstruments", tbSelectedInstruments.Text);
+            string unchecked_ = string.Join(",", spInstruments.Children.OfType<CheckBox>()
+                .Where(cb => cb.IsChecked == false)
+                .Select(cb => (string)cb.Tag));
+            XElement elUncheckedInstruments = new XElement("UncheckedInstruments", unchecked_);
             elRoot.Add(elCsvRootDir);
-            elRoot.Add(elSelectedInstruments);
+            elRoot.Add(elUncheckedInstruments);
             element.Add(elRoot);
         }
 
@@ -418,11 +514,11 @@ namespace NinjaTrader.Gui.NinjaScript
                 bConvert.IsEnabled = true;
                 bConvert.Content = "_Cancel";
                 tbCsvRootDir.IsReadOnly = true;
-                tbSelectedInstruments.IsReadOnly = true;
+                svInstruments.IsEnabled = false;
                 double margin = (double)FindResource("MarginBase");
-                lProgress.Margin = new Thickness(0, 0, 0, 0);
+                lProgress.Margin = new Thickness(0);
                 lProgress.Height = 24;
-                pbProgress.Margin = new Thickness((double)FindResource("MarginBase"));
+                pbProgress.Margin = new Thickness(margin);
                 pbProgress.Height = 16;
                 pbProgress.Minimum = 0;
                 pbProgress.Maximum = filesCount;
@@ -441,7 +537,7 @@ namespace NinjaTrader.Gui.NinjaScript
                 pbProgress.Margin = new Thickness(0);
                 pbProgress.Height = 0;
                 tbCsvRootDir.IsReadOnly = false;
-                tbSelectedInstruments.IsReadOnly = false;
+                svInstruments.IsEnabled = true;
                 bConvert.IsEnabled = true;
                 bConvert.Content = "_Convert";
             });
