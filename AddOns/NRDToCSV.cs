@@ -360,7 +360,7 @@ namespace NinjaTrader.Gui.NinjaScript
 
             try
             {
-                MarketReplay.DumpMarketDepth(entry.Instrument, entry.Date.AddDays(1), entry.Date.AddDays(1), entry.CsvFileName);
+                MarketReplay.DumpMarketDepth(entry.Instrument, entry.Date, entry.Date, entry.CsvFileName); // Instrument, start date, end date, csv file name
                 logout(string.Format("Conversion \"{0}\" to \"{1}\" complete", entry.FromName, entry.ToName));
             }
             catch (Exception error)
@@ -420,8 +420,9 @@ namespace NinjaTrader.Gui.NinjaScript
                 tbCsvRootDir.IsReadOnly = true;
                 tbSelectedInstruments.IsReadOnly = true;
                 double margin = (double)FindResource("MarginBase");
+                lProgress.Margin = new Thickness(0, 0, 0, 0);
                 lProgress.Height = 24;
-                pbProgress.Margin = new Thickness(margin, 0, margin, margin);
+                pbProgress.Margin = new Thickness((double)FindResource("MarginBase"));
                 pbProgress.Height = 16;
                 pbProgress.Minimum = 0;
                 pbProgress.Maximum = filesCount;
