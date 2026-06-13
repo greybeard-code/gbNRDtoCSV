@@ -18,16 +18,18 @@
 5. Press **Convert** button to convert all `*.nrd` replay files (could take some time to proceed)
 6. Check `Documents` \ `NinjaTrader 8` \ `db` \ `replay.csv` folder with the results
 
-## Filter files to convert
+## Select instruments to convert
 
-You can specify filenames to convert with semicolon-separated regular expressions (experiment [here][regex]):
+Instruments found in the NRD replay folder are listed as checkboxes; only checked
+instruments are converted. Use **All** / **None** to toggle every instrument at once.
 
-- Convert only Gold Commodity futures: `GC`
-- Convert several instruments: `GC; HG; 6E`
-- Convert files with names related only to December 2021: `202112\d{2}`<br>
-  Means: `"2021"` `"12"` `<any 2 digits of Day>`
-- Convert files with names related to all Decembers of Gold Commodity futures: `GC.*\d{4}12\d{2}`<br>
-  Means: `"GC"` `<any chars>` `<any 4 digits of Year>` `"12"` `<any 2 digits of Day>`
+For large lists, you can bulk-select instruments with semicolon-separated regular
+expressions (experiment [here][regex]) matched against the instrument name, then press
+**Check** or **Uncheck** to apply:
+
+- Select only Gold Commodity futures: `GC`
+- Select several instruments: `GC; HG; 6E`
+- Select all MNQ contracts expiring in March, June, September or December of 2021/2022: `^MNQ (03|06|09|12)-2[12]$`
 
 ## Converted `*.csv` file format
 

@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -66,6 +67,7 @@ namespace NinjaTrader.Gui.NinjaScript
         private static readonly int PARALLEL_THREADS_COUNT = 4;
 
         private TextBox tbCsvRootDir;
+        private TextBox tbInstrumentFilter;
         private Button bConvert;
         private TextBox tbOutput;
         private Label lProgress;
@@ -84,7 +86,7 @@ namespace NinjaTrader.Gui.NinjaScript
         {
             Caption = "NRD to CSV";
             Width = 512;
-            Height = 512;
+            Height = 544;
             Content = BuildContent();
             Loaded += (o, e) =>
             {
@@ -139,6 +141,23 @@ namespace NinjaTrader.Gui.NinjaScript
                 VerticalContentAlignment = VerticalAlignment.Center,
             });
 
+            Button btnCheckMatching = new Button() { Content = "Check", Padding = new Thickness(6, 0, 6, 0), Margin = new Thickness(4, 0, 4, 0) };
+            Button btnUncheckMatching = new Button() { Content = "Uncheck", Padding = new Thickness(6, 0, 6, 0) };
+            btnCheckMatching.Click += (s, ev) => ApplyInstrumentFilter(true);
+            btnUncheckMatching.Click += (s, ev) => ApplyInstrumentFilter(false);
+            StackPanel spFilterButtons = new StackPanel() { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            spFilterButtons.Children.Add(btnCheckMatching);
+            spFilterButtons.Children.Add(btnUncheckMatching);
+            tbInstrumentFilter = new TextBox()
+            {
+                VerticalContentAlignment = VerticalAlignment.Center,
+                ToolTip = "Semicolon separated regular expressions matched against instrument names, e.g. \"MNQ\" or \"ES;NQ\" or \"^MNQ (03|06|09|12)-2[12]$\"",
+            };
+            DockPanel dpInstrumentsFilter = new DockPanel() { Margin = new Thickness(margin, margin, margin, 0) };
+            DockPanel.SetDock(spFilterButtons, Dock.Right);
+            dpInstrumentsFilter.Children.Add(spFilterButtons);
+            dpInstrumentsFilter.Children.Add(tbInstrumentFilter);
+
             spInstruments = new StackPanel();
             spInstruments.Children.Add(new TextBlock()
             {
@@ -179,20 +198,23 @@ namespace NinjaTrader.Gui.NinjaScript
             grid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
+            grid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition() { Height = new GridLength(1, GridUnitType.Star) });
             grid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition() { Height = GridLength.Auto });
             Grid.SetRow(lCsvRootDir, 0);
             Grid.SetRow(tbCsvRootDir, 1);
             Grid.SetRow(dpInstrumentsHeader, 2);
-            Grid.SetRow(svInstruments, 3);
-            Grid.SetRow(bConvert, 4);
-            Grid.SetRow(tbOutput, 5);
-            Grid.SetRow(lProgress, 6);
-            Grid.SetRow(pbProgress, 7);
+            Grid.SetRow(dpInstrumentsFilter, 3);
+            Grid.SetRow(svInstruments, 4);
+            Grid.SetRow(bConvert, 5);
+            Grid.SetRow(tbOutput, 6);
+            Grid.SetRow(lProgress, 7);
+            Grid.SetRow(pbProgress, 8);
             grid.Children.Add(lCsvRootDir);
             grid.Children.Add(tbCsvRootDir);
             grid.Children.Add(dpInstrumentsHeader);
+            grid.Children.Add(dpInstrumentsFilter);
             grid.Children.Add(svInstruments);
             grid.Children.Add(bConvert);
             grid.Children.Add(tbOutput);
@@ -253,6 +275,27 @@ namespace NinjaTrader.Gui.NinjaScript
                     }
                 });
             }));
+        }
+
+        private void ApplyInstrumentFilter(bool check)
+        {
+            string pattern = tbInstrumentFilter.Text;
+            if (string.IsNullOrWhiteSpace(pattern)) return;
+
+            List<Regex> regexes;
+            try
+            {
+                regexes = pattern.Split(';').Select(p => new Regex(p.Trim())).ToList();
+            }
+            catch (Exception error)
+            {
+                logout(string.Format("ERROR: Invalid regex \"{0}\": {1}", pattern, error.Message));
+                return;
+            }
+
+            foreach (CheckBox cb in spInstruments.Children.OfType<CheckBox>())
+                if (regexes.Any(r => r.IsMatch((string)cb.Tag)))
+                    cb.IsChecked = check;
         }
 
         private void OnConvertButtonClick(object sender, RoutedEventArgs e)

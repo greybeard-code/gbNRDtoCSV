@@ -8,6 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 - Conversion exception handling
 - Additional run notifications
+- Regex-based bulk check/uncheck of instruments in the instrument list
 
 ### Changed
 - Minor UI adjustments
