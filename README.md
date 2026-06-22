@@ -218,8 +218,7 @@ Every release, along with the migration instructions, is documented on the GitHu
 ## License
 The code is available under the [MIT license][license].
 
-## Contacts
-Feel free to contact me at **@gmail.com**: **eugene.ilyin**
+
 
 [releases]: https://github.com/eugeneilyin/nrdtocsv/tree/main/Releases
 [license]: /License.txt
