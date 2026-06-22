@@ -307,6 +307,9 @@ namespace NinjaTrader.Gui.NinjaScript
             {
                 if (!canceling)
                 {
+                    if (MessageBox.Show("Cancel the conversion in progress?", "Confirm Cancel",
+                            MessageBoxButton.YesNo, MessageBoxImage.Question) != MessageBoxResult.Yes)
+                        return;
                     canceling = true;
                     logout("Canceling convertion...");
                     bConvert.IsEnabled = false;
@@ -318,7 +321,7 @@ namespace NinjaTrader.Gui.NinjaScript
             tbOutput.Clear();
 
             string nrdDir = Path.Combine(Globals.UserDataDir, "db", "replay");
-            string csvDir = tbCsvRootDir.Text;
+            string csvDir = tbCsvRootDir.Text.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
 
             if (!Directory.Exists(nrdDir))
             {
