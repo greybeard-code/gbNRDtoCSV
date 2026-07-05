@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
+using System.Threading;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -359,8 +360,8 @@ namespace NinjaTrader.Gui.NinjaScript
                 catch (Exception error)
                 {
                     logout(string.Format("ERROR: Unable to create the CSV root directory \"{0}\": {1}", csvDir, error.ToString()));
+                    return;   // only bail on failure; a freshly created dir must still convert
                 }
-                return;
             }
 
             Globals.RandomDispatcher.InvokeAsync(new Action(() =>
@@ -463,7 +464,10 @@ namespace NinjaTrader.Gui.NinjaScript
                     });
                     if (canceling) break;
                 }
-                if (--taskCount == 0)
+                // Workers run on separate dispatcher threads; a bare --taskCount
+                // races and can fire complete() twice or never. Interlocked makes
+                // the "last worker done" test atomic.
+                if (Interlocked.Decrement(ref taskCount) == 0)
                 {
                     complete();
                     if (canceling)
@@ -497,13 +501,24 @@ namespace NinjaTrader.Gui.NinjaScript
                 }
             }
 
+            // Dump to a temp file and rename on success. DumpMarketDepth writes
+            // straight to the target, so a canceled/crashed run would otherwise
+            // leave a half-written CSV that the File.Exists skip check treats as
+            // done. The final path exists only once a day is fully converted.
+            string tmpFile = entry.CsvFileName + ".tmp";
             try
             {
-                MarketReplay.DumpMarketDepth(entry.Instrument, entry.Date, entry.Date, entry.CsvFileName);
+                if (File.Exists(tmpFile))
+                    File.Delete(tmpFile);
+                MarketReplay.DumpMarketDepth(entry.Instrument, entry.Date, entry.Date, tmpFile);
+                if (File.Exists(entry.CsvFileName))
+                    File.Delete(entry.CsvFileName);
+                File.Move(tmpFile, entry.CsvFileName);
                 logout(string.Format("Conversion \"{0}\" to \"{1}\" complete", entry.FromName, entry.ToName));
             }
             catch (Exception error)
             {
+                try { if (File.Exists(tmpFile)) File.Delete(tmpFile); } catch { }
                 logout(string.Format("ERROR: Conversion \"{0}\" to \"{1}\" failed: {2}",
                     entry.FromName, entry.ToName, error.ToString()));
             }
