@@ -93,3 +93,44 @@ python nrd_to_parquet.py --continuous-root "M:\NinjaTrader_DataRepo\RawData\Cont
 - Header event counts are treated as a size hint, not gospel — some `.nrd`
   files under-report their true event count, and the converter reads the whole
   stream regardless.
+
+## Auditing a repo
+
+```bash
+python audit_repo.py --repo /path/to/NinjaTrader_DataRepo --out audit_out
+```
+
+`audit_repo.py` checks a whole repo (per-contract `RawData/NRD`, the roll-selected
+`RawData/Continuous` archive, and `RawData/Parquet`) using only `.nrd` headers
+(3.5 KB each) and Parquet footers. It decodes nothing, so a repo of tens of
+thousands of days takes minutes.
+
+For every symbol-day it reports:
+- which contract the continuous file really is (matched against the
+  per-contract folders)
+- whether that contract was the day's volume leader, which catches late or
+  early rolls
+- thin days and partial days (the recording starts late or ends early)
+- Parquet days that aren't a faithful conversion of the current archive file:
+  stale, missing, or missing L2
+
+It writes `days.csv`, `flagged.csv` and a per-symbol `summary.md`. The flags are
+documented in the script's docstring.
+
+Why it matters: a day converted from the **expiring** contract after volume moved
+on looks like a normal file but holds almost no trades. Backtests don't error on
+it; they just see near-empty bars. The same thing happens when a roll rule is
+corrected after days were already converted, since skip-existing never revisits
+them.
+
+Caveats:
+- A faithful conversion has L1 rows equal to the sum of header slots 0-9, and L2
+  rows equal to slots 10+11. That holds exactly on normal files. When a header
+  under-reports (see above), a mismatch can be the header's fault rather than the
+  Parquet's. If the Parquet has *more* rows than the header on the same contract,
+  decode the file before overwriting anything.
+- Some recordings are malformed (a stream running past its header's time
+  window). Decode suspicious days before re-converting them.
+- "Larger file = front contract" (see above) is a size heuristic. The audit uses
+  each contract's trade volume from the header instead, which is what actually
+  decides the front month.
