@@ -37,6 +37,9 @@ Flags (a day can carry several):
                    Parquet date range)
   PQ_L2_MISSING    L1 present, L2 missing
   PQ_ORPHAN        Parquet day with no Continuous file
+  PQ_EXTERNAL      Parquet day filled from an outside vendor (footer
+                   replay_importer.source_name "databento ...") because the
+                   recording was missing or unusable; informational
   CAL_GAP          Mon-Fri with no Continuous file inside the symbol's range
                    (full-closure holidays are noted, not flagged)
 
@@ -179,7 +182,7 @@ def scan(repo: Path, symbols, progress=True):
                 try:
                     md = pq.read_metadata(f)
                     meta = {k.decode(): v.decode() for k, v in (md.metadata or {}).items()
-                            if k.startswith(b"nrd2parquet")}
+                            if k.startswith(b"nrd2parquet") or k == b"replay_importer.source_name"}
                     pqd[(m.group(1).upper(), f.stem, m.group(3))] = (md.num_rows, meta)
                 except Exception as e:   # unreadable footer is itself a finding
                     pqd[(m.group(1).upper(), f.stem, m.group(3))] = (-1, {"error": str(e)})
@@ -258,15 +261,22 @@ def audit(per, cont, pqd, leader_share, thin_share):
                                          f"{_net_to_et(h['t1']):%H:%M} ET")
             l1 = pqd.get((sym, d, "L1"))
             l2 = pqd.get((sym, d, "L2"))
+            external = False
             if l1:
                 r["pq_l1_rows"], meta = l1
+                external = meta.get("replay_importer.source_name", "").startswith("databento")
                 r["pq_src_size"] = meta.get("nrd2parquet.source_size", "")
                 src = [c for c, ch in cands if str(ch["size"]) == r["pq_src_size"]]
                 r["pq_src_contract"] = src[0] if src else ""
             if l2:
                 r["pq_l2_rows"] = l2[0]
             in_pq = sym in pq_range and pq_range[sym][0] <= d <= pq_range[sym][1]
-            if h and not h["bad"]:
+            if external:
+                # Filled from an outside vendor because the recording was missing
+                # or unusable: not comparable to the archive file by design.
+                flags.append("PQ_EXTERNAL")
+                notes.append(meta.get("replay_importer.source_name", ""))
+            elif h and not h["bad"]:
                 # Provenance first: a Parquet whose footer names this exact
                 # source file (same size) IS a conversion of it, even when the
                 # header under-reports its event counts. Row counts vs the
@@ -289,7 +299,7 @@ def audit(per, cont, pqd, leader_share, thin_share):
                     flags.append("PQ_MISSING")
                 if l1 and not l2:
                     flags.append("PQ_L2_MISSING")
-            elif (l1 or l2) and not h:
+            if not external and (l1 or l2) and not h:
                 flags.append("PQ_ORPHAN")
             r["flags"] = " ".join(flags)
             r["note"] = "; ".join(notes)
@@ -320,7 +330,7 @@ def write(rows, out: Path, args):
         for fl in r.get("flags", "").split():
             by[s][fl] += 1
     kinds = ["CONT_NOT_LEADER", "CONT_THIN", "CONT_PARTIAL", "CONT_UNMATCHED", "CONT_UNREADABLE",
-             "CONT_NO_L2", "PQ_STALE",
+             "CONT_NO_L2", "PQ_STALE", "PQ_EXTERNAL",
              "PQ_MISSING", "PQ_L2_MISSING", "PQ_ORPHAN", "CAL_GAP"]
     lines = ["# Repo audit summary", "",
              f"leader share < {args.leader_share:.0%}, thin < {args.thin_share:.0%} of median", "",
