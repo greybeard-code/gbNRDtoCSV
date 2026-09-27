@@ -28,8 +28,9 @@ Flags (a day can carry several):
                    sessions show up here too)
   CONT_UNMATCHED   Continuous file matches no per-contract file (can't tell
                    which contract it is; informational)
-  PQ_STALE         Parquet row count != Continuous header: converted from a
-                   different file than the archive holds now
+  PQ_STALE         Parquet converted from a different file than the archive
+                   holds now: footer source size != archive file (or, without
+                   that metadata, row count != the archive header)
   CONT_NO_L2       archive file has no depth events but the Parquet L2 does
                    (the archive lost depth; keep the Parquet L2, don't re-convert it)
   PQ_MISSING       Continuous day with no Parquet L1 (inside the symbol's
@@ -266,7 +267,12 @@ def audit(per, cont, pqd, leader_share, thin_share):
                 r["pq_l2_rows"] = l2[0]
             in_pq = sym in pq_range and pq_range[sym][0] <= d <= pq_range[sym][1]
             if h and not h["bad"]:
-                if l1 and l1[0] != h["l1"]:
+                # Provenance first: a Parquet whose footer names this exact
+                # source file (same size) IS a conversion of it, even when the
+                # header under-reports its event counts. Row counts vs the
+                # header only decide for files without that metadata.
+                same_src = bool(l1) and r.get("pq_src_size") == str(h["size"])
+                if l1 and not same_src and l1[0] != h["l1"]:
                     flags.append("PQ_STALE")
                     notes.append(f"L1 rows {l1[0]:,} vs archive {h['l1']:,}"
                                  + (f" (parquet is {r['pq_src_contract']})" if r.get("pq_src_contract") else ""))
@@ -276,7 +282,7 @@ def audit(per, cont, pqd, leader_share, thin_share):
                     # The Parquet is the better copy here: do NOT re-convert L2.
                     flags.append("CONT_NO_L2")
                     notes.append(f"archive has no depth; parquet L2 {l2[0]:,} rows")
-                elif l2 and l2[0] != h["l2"] and "PQ_STALE" not in flags:
+                elif l2 and not same_src and l2[0] != h["l2"] and "PQ_STALE" not in flags:
                     flags.append("PQ_STALE")
                     notes.append(f"L2 rows {l2[0]:,} vs archive {h['l2']:,}")
                 if not l1 and in_pq and wd != 5:
